@@ -3,7 +3,7 @@ from torchvision.datasets import MNIST
 from torch.optim import Adam
 import matplotlib.pyplot as plt
 from torchvision import transforms
-from models import LeNet, train_step, test_step
+from models import EntropyLeNet, train_step, test_step
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -14,7 +14,7 @@ iterations = 200000
 batch_size = 32
 lr = 0.001
 
-model = LeNet()
+model = EntropyLeNet()
 device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
 model = model.to(device)
 opt = Adam(model.parameters(), lr=lr)
