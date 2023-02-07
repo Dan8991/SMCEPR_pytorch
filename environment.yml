@@ -1,0 +1,14 @@
+name: SMCPER
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+   - python=3.10
+   - pytorch
+   - torchvision 
+   - pytorch-cuda=11.7
+   - matplotlib
+   - numpy
+   - pip
+   - tqdm
