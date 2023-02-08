@@ -3,6 +3,15 @@ import torch.nn as nn
 
 class ConvDecoder(nn.Module):
 
+    '''
+    In the original paper they say the they have self.W.shape = (IO, IO)
+    however I find this puzzling since usually IOxIO > IOxHW which means
+    that the number of parameters for the decoder is much larger than the number 
+    of parameters in the layers. Additionally, the authors say that it is each 
+    filter that is seen as a sample from the learned probability distribution
+    so I assume that the IOxIO was a typo and instead use a matrix with shape 
+    HWxHW (same for the bias)
+    '''
     def __init__(self, in_channel, out_channel, kernel_size):
         super(ConvDecoder, self).__init__()
 
@@ -14,11 +23,11 @@ class ConvDecoder(nn.Module):
         self.out_channel = out_channel
         self.IO = in_channel * out_channel
         self.HW = kernel_size[0] * kernel_size[1]
-        self.b = nn.Parameter(th.zeros(self.IO), requires_grad=True)
-        self.w = nn.Parameter(th.ones(self.IO, self.IO), requires_grad=True)
+        self.b = nn.Parameter(th.zeros(self.HW), requires_grad=True)
+        self.w = nn.Parameter(th.ones(self.HW, self.HW), requires_grad=True)
 
     def forward(self, x):
-        x = x.view(self.IO, self.HW).T
+        x = x.view(self.IO, self.HW)
         return th.matmul(x + self.b, self.w).T.reshape(
             self.out_channel,
             self.in_channel,
