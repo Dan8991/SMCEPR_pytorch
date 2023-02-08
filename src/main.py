@@ -14,7 +14,8 @@ iterations = 200000
 batch_size = 32
 lr = 0.001
 
-model = EntropyCafeLeNet()
+model = EntropyLeNet()
+print("Model size and decoder size for the network:", model.get_rate())
 device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
 model = model.to(device)
 opt = Adam(model.parameters(), lr=lr)

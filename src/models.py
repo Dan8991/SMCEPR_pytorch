@@ -1,7 +1,6 @@
 from torch import nn
 import torch as th
 from parameter_decoders import ConvDecoder, LinearDecoder
-from modified_layers import EntropyConv2d
 from torch.nn.init import kaiming_uniform_, _calculate_fan_in_and_fan_out
 from torch.nn.init import uniform_
 import torch.nn.functional as F
@@ -52,6 +51,20 @@ class EntropyLeNet(nn.Module):
         fan_in, _ = _calculate_fan_in_and_fan_out(w)
         bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
         uniform_(b, -bound, bound)
+
+    def get_rate(self):
+        parameters_size = 0
+        decoders_size = 0
+        for w, b in zip(self.w_param, self.b_param):
+            parameters_size += w.numel() + b.numel()
+
+        for param in self.wdec.parameters():
+            decoders_size += param.numel()
+
+        for param in self.bdec.parameters():
+            decoders_size += param.numel()
+
+        return parameters_size * 4, decoders_size * 4
 
     def forward(self, x):
         x = x.view(-1, 784)
@@ -140,6 +153,26 @@ class EntropyCafeLeNet(nn.Module):
 
         for w, b in zip(self.lin_w_param, self.lin_b_param):
             self.init_weights(w, b)
+
+    def get_rate(self):
+        parameters_size = 0
+        decoders_size = 0
+        for w, b in zip(self.conv_w_param, self.conv_b_param):
+            parameters_size += w.numel() + b.numel()
+
+        for w, b in zip(self.lin_w_param, self.lin_b_param):
+            parameters_size += w.numel() + b.numel()
+
+        for param in self.wdecs.parameters():
+            decoders_size += param.numel()
+
+        for param in self.wdec_lin.parameters():
+            decoders_size += param.numel()
+
+        for param in self.wdec_bias.parameters():
+            decoders_size += param.numel()
+
+        return parameters_size * 4, decoders_size * 4
 
     def init_weights(self, w, b):
 
