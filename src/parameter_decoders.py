@@ -30,13 +30,9 @@ class LinearDecoder(nn.Module):
         self.w = nn.Parameter(th.ones(1), requires_grad=True)  
         self.is_bias = is_bias
         
-    def forward(self, x, in_features, out_features=1):
+    def forward(self, x):
         w_out = (x + self.b) * self.w
-        if self.is_bias:
-            return w_out.reshape(in_features)
-        else:
-            return w_out.reshape(out_features, in_features)
-
+        return w_out
 
 
 
