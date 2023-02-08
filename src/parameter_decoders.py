@@ -14,21 +14,24 @@ class ConvDecoder(nn.Module):
         self.out_channel = out_channel
         self.IO = in_channel * out_channel
         self.HW = kernel_size[0] * kernel_size[1]
-        self.b = nn.Parameter(th.zeros(1, self.IO), requires_grad=True)
-        self.w = nn.Parameter(th.ones(1, self.IO, self.IO), requires_grad=True)
+        self.b = nn.Parameter(th.zeros(self.IO), requires_grad=True)
+        self.w = nn.Parameter(th.ones(self.IO, self.IO), requires_grad=True)
 
     def forward(self, x):
-        print(self.HW, self.IO)
-        assert x.shape == (self.HW, self.IO)
-        return th.matmul(x + self.b, self.w).reshape(self.out_channel, self.in_channel, self.kernel_size[0], self.kernel_size[1])
+        x = x.view(self.IO, self.HW).T
+        return th.matmul(x + self.b, self.w).T.reshape(
+            self.out_channel,
+            self.in_channel,
+            self.kernel_size[0],
+            self.kernel_size[1]
+        )
 
 class LinearDecoder(nn.Module):
 
-    def __init__(self, is_bias=False):
+    def __init__(self):
         super(LinearDecoder, self).__init__()
         self.b = nn.Parameter(th.zeros(1), requires_grad=True)
         self.w = nn.Parameter(th.ones(1), requires_grad=True)  
-        self.is_bias = is_bias
         
     def forward(self, x):
         w_out = (x + self.b) * self.w
