@@ -263,7 +263,7 @@ def test_step(model, test_dataloader, device):
     print("Rate parts: " + str(model_size) + " " + str(decoder_size))
     print("Uncompressed Rate:" + str(uncompressed_model_size + uncompressed_decoder_size))
     print("Uncompressed Rate parts: " + str(uncompressed_model_size) + " " + str(uncompressed_decoder_size))
-    print("Compression Ratio:" + str((model_size + decoder_size) / (uncompressed_model_size + uncompressed_decoder_size)))
+    print("Compression Ratio:" + str( (uncompressed_model_size + uncompressed_decoder_size) / (model_size + decoder_size)))
     model.to("cuda" if th.cuda.is_available() else "cpu")
     for x,y in test_dataloader:
         with th.no_grad():
