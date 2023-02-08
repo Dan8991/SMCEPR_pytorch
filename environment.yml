@@ -12,3 +12,5 @@ dependencies:
    - numpy
    - pip
    - tqdm
+   - pip:
+     - compressai

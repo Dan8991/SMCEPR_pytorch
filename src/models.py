@@ -40,8 +40,8 @@ class EntropyLeNet(nn.Module):
         self.w_param = nn.ParameterList([nn.Parameter(th.randn(o, i), requires_grad=True) for i, o in self.io_list])
         self.b_param = nn.ParameterList([nn.Parameter(th.zeros(o), requires_grad=True) for i, o in self.io_list])
 
-        for w, b in zip(self.w_param, self.b_param):
-            self.init_weights(w, b)
+        # for w, b in zip(self.w_param, self.b_param):
+            # self.init_weights(w, b)
 
     def init_weights(self, w, b):
         # initialize weights
@@ -52,7 +52,7 @@ class EntropyLeNet(nn.Module):
         bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
         uniform_(b, -bound, bound)
 
-    def get_rate(self):
+    def get_model_size(self):
         parameters_size = 0
         decoders_size = 0
         for w, b in zip(self.w_param, self.b_param):
@@ -66,15 +66,56 @@ class EntropyLeNet(nn.Module):
 
         return parameters_size * 4, decoders_size * 4
 
+    def get_rate(self):
+
+        self.wdec.eval()
+        self.bdec.eval()
+
+        parameters_size = 0
+        decoders_size = 0
+        for w, b in zip(self.w_param, self.b_param):
+            strings = self.wdec.entropy_bottleneck.compress(
+                w.unsqueeze(0).unsqueeze(1).round()
+            )
+            parameters_size += len(strings[0])
+
+            strings = self.bdec.entropy_bottleneck.compress(b.unsqueeze(0).unsqueeze(1).round())
+            parameters_size += len(strings[0])
+
+        for param in self.wdec.parameters():
+            decoders_size += param.numel()
+
+        for param in self.bdec.parameters():
+            decoders_size += param.numel()
+
+        decoders_size += self.wdec.entropy_bottleneck.quantiles.numel()
+        decoders_size += self.wdec.entropy_bottleneck._quantized_cdf.numel()
+        decoders_size += self.bdec.entropy_bottleneck.quantiles.numel()
+        decoders_size += self.bdec.entropy_bottleneck._quantized_cdf.numel()
+
+        self.wdec.train()
+        self.bdec.train()
+
+        return parameters_size * 4, decoders_size * 4
+
+    def update(self, force=False):
+        self.wdec.update(force=force)
+        self.bdec.update(force=force)
+
     def forward(self, x):
         x = x.view(-1, 784)
+        rate = 0
         for i, (w, b) in enumerate(zip(self.w_param, self.b_param)):
-            new_w = self.wdec(w)
-            new_b = self.bdec(b)
+            new_w, likelyhoods_w = self.wdec(w)
+            new_b, likelyhoods_b = self.bdec(b)
+            new_rate = - th.log2(likelyhoods_w).sum()
+            new_rate = new_rate  - th.log2(likelyhoods_b).sum() 
+            new_rate = new_rate / (w.numel() + b.numel())
+            rate = rate + new_rate
             x = F.linear(x, new_w, new_b)
             if i < 2:
                 x = self.relu(x)
-        return x
+        return x, rate
 
 class CafeLeNet(nn.Module):
 
@@ -186,8 +227,8 @@ class EntropyCafeLeNet(nn.Module):
 
     def forward(self, x):
         for w, b, wdec in zip(self.conv_w_param, self.conv_b_param, self.wdecs):
-            new_w = wdec(w)
-            new_b = self.wdec_bias(b)
+            new_w, rate = wdec(w)
+            new_b, rate = self.wdec_bias(b)
             x = self.max_pool(self.relu(F.conv2d(x, w, b)))
 
         x = x.view(-1, 4*4*50)
@@ -199,25 +240,36 @@ class EntropyCafeLeNet(nn.Module):
                 x = self.relu(x)
         return x
 
-def train_step(model, x, y, opt, device):
+def train_step(model, x, y, opt, device, lambda_RD):
     x = x.to(device)
     y = y.to(device)
     opt.zero_grad()
-    y_hat = model(x)
-    loss = nn.CrossEntropyLoss()(y_hat, y)
+    y_hat, rate = model(x)
+    loss = nn.CrossEntropyLoss()(y_hat, y) 
+    loss = loss + lambda_RD * rate
     loss.backward()
     opt.step()
-    return loss.item()
+    return loss.item(), rate
 
 def test_step(model, test_dataloader, device):
     cum_loss = 0
     cum_acc = 0
     num_steps = 0
+    model.cpu()
+    model.update(force=True)
+    model_size, decoder_size = model.get_rate()
+    uncompressed_model_size, uncompressed_decoder_size = model.get_model_size()
+    print("Rate:" + str(model_size + decoder_size))
+    print("Rate parts: " + str(model_size) + " " + str(decoder_size))
+    print("Uncompressed Rate:" + str(uncompressed_model_size + uncompressed_decoder_size))
+    print("Uncompressed Rate parts: " + str(uncompressed_model_size) + " " + str(uncompressed_decoder_size))
+    print("Compression Ratio:" + str((model_size + decoder_size) / (uncompressed_model_size + uncompressed_decoder_size)))
+    model.to("cuda" if th.cuda.is_available() else "cpu")
     for x,y in test_dataloader:
         with th.no_grad():
             x = x.to(device)
             y = y.to(device)
-            y_hat = model(x)
+            y_hat, rate = model(x)
             loss = nn.CrossEntropyLoss()(y_hat, y)
 
         cum_loss += loss.item()

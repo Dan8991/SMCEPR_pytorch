@@ -15,7 +15,7 @@ batch_size = 32
 lr = 0.001
 
 model = EntropyLeNet()
-print("Model size and decoder size for the network:", model.get_rate())
+print("Model size and decoder size for the network:", model.get_model_size())
 device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
 model = model.to(device)
 opt = Adam(model.parameters(), lr=lr)
@@ -24,13 +24,16 @@ train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
 test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
 
 i = 0
+lambda_RD = 0.1
 while i < iterations:
     cum_loss = 0
+    cum_rate = 0
     for x, y in tqdm(train_dataloader):
         x = x.to(device)
         y = y.to(device)
-        loss = train_step(model, x, y, opt, device)
+        loss, rate = train_step(model, x, y, opt, device, lambda_RD)
         cum_loss += loss
+        cum_rate += rate
         i += 1
-    print(f"Train Loss: {cum_loss / 10000}")
+    print(f"Train Loss: {cum_loss / 10000}, {cum_rate / 10000}")
     test_step(model, test_dataloader, device)

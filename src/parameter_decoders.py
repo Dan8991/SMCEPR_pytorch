@@ -1,5 +1,17 @@
 import torch as th 
 import torch.nn as nn
+from torch.autograd import Function
+from compressai.entropy_models import EntropyBottleneck
+
+class StraightThrough(Function):
+
+    @staticmethod
+    def forward(ctx, tensor):
+        return tensor.round()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output
 
 class ConvDecoder(nn.Module):
 
@@ -41,10 +53,16 @@ class LinearDecoder(nn.Module):
         super(LinearDecoder, self).__init__()
         self.b = nn.Parameter(th.zeros(1), requires_grad=True)
         self.w = nn.Parameter(th.ones(1), requires_grad=True)  
+        self.entropy_bottleneck = EntropyBottleneck(1)
+        self.ste = StraightThrough()
+
+    def update(self, force=False):
+        self.entropy_bottleneck.update(force)
         
     def forward(self, x):
-        w_out = (x + self.b) * self.w
-        return w_out
+        x_hat, x_likelyhoods = self.entropy_bottleneck(x.unsqueeze(1))
+        w_out = (self.ste.apply(x) + self.b) * self.w
+        return w_out, x_likelyhoods
 
 
 
