@@ -3,8 +3,10 @@ import torch as th
 from parameter_decoders import ConvDecoder, LinearDecoder
 from torch.nn.init import kaiming_uniform_, _calculate_fan_in_and_fan_out
 from torch.nn.init import uniform_
+from entropy_layers import EntropyLinear
 import torch.nn.functional as F
 import math
+import matplotlib.pyplot as plt
 
 class LeNet(nn.Module):
 
@@ -24,7 +26,7 @@ class LeNet(nn.Module):
 
 class EntropyLeNet(nn.Module):
 
-    def __init__(self):
+    def __init__(self, span=10):
 
         super().__init__()
 
@@ -32,89 +34,78 @@ class EntropyLeNet(nn.Module):
         self.relu = nn.ReLU()
 
         #creating the decoders for the linear layers
-        self.wdec = LinearDecoder()
-        self.bdec = LinearDecoder()
+        #The fan in should be the smallest input size for the group of layers considered by the decoder
+        self.wdec = LinearDecoder(span=span, fan_in=300.0)
+        self.bdec = LinearDecoder(span=span, fan_in=100.0)
+        self.cdec = LinearDecoder(span=span, fan_in=100.0)
+        self.ema_decay = 0
 
-        # creating the parameters for the linear layers
-        self.io_list = [(784, 300), (300, 100), (100, 10)]
-        self.w_param = nn.ParameterList([nn.Parameter(th.randn(o, i), requires_grad=True) for i, o in self.io_list])
-        self.b_param = nn.ParameterList([nn.Parameter(th.zeros(o), requires_grad=True) for i, o in self.io_list])
+        # creating the entropic linear layers
+        self.fc1 = EntropyLinear(784, 300, self.wdec, self.bdec, self.ema_decay)
+        self.fc2 = EntropyLinear(300, 100, self.wdec, self.bdec, self.ema_decay)
+        self.fc3 = EntropyLinear(100, 10, self.cdec, self.bdec, self.ema_decay)
 
-        # for w, b in zip(self.w_param, self.b_param):
-            # self.init_weights(w, b)
+        self.init_weights(self.fc1, span, 300.0)
+        self.init_weights(self.fc2, span, 300.0)
+        self.init_weights(self.fc3, span, 100.0)
 
-    def init_weights(self, w, b):
+    def init_weights(self, layer, span, min_in):
+
+        fan_in = layer.w.data.size()[1]
+
+        const_max = math.sqrt(6.0) / math.sqrt(min_in)
+        default_const = math.sqrt(6.0) / math.sqrt(fan_in)
+
+        mult = span / 2 / const_max * default_const
+
         # initialize weights
-        kaiming_uniform_(w, a=math.sqrt(5))
+        layer.w.data.uniform_(-mult, mult)
 
         # initialize bias
-        fan_in, _ = _calculate_fan_in_and_fan_out(w)
-        bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
-        uniform_(b, -bound, bound)
-
-    def get_model_size(self):
-        parameters_size = 0
-        decoders_size = 0
-        for w, b in zip(self.w_param, self.b_param):
-            parameters_size += w.numel() + b.numel()
-
-        for param in self.wdec.parameters():
-            decoders_size += param.numel()
-
-        for param in self.bdec.parameters():
-            decoders_size += param.numel()
-
-        return parameters_size * 4, decoders_size * 4
+        layer.b.data.uniform_(-mult, mult)
 
     def get_rate(self):
 
-        self.wdec.eval()
-        self.bdec.eval()
+        p1, t1 = self.fc1.get_compressed_params_size()
+        p2, t2 = self.fc2.get_compressed_params_size()
+        p3, t3 = self.fc3.get_compressed_params_size()
 
-        parameters_size = 0
-        decoders_size = 0
-        for w, b in zip(self.w_param, self.b_param):
-            strings = self.wdec.entropy_bottleneck.compress(
-                w.unsqueeze(0).unsqueeze(1).round()
-            )
-            parameters_size += len(strings[0])
+        d1 = self.wdec.get_model_size()
+        d2 = self.bdec.get_model_size()
+        d3 = self.cdec.get_model_size()
 
-            strings = self.bdec.entropy_bottleneck.compress(b.unsqueeze(0).unsqueeze(1).round())
-            parameters_size += len(strings[0])
+        parameters_size = p1 + p2 + p3 
+        entropy_model_size = t1 + t2 + t3 + d1 + d2 + d3
+        return parameters_size, entropy_model_size
 
-        for param in self.wdec.parameters():
-            decoders_size += param.numel()
+    def get_original_size(self):
 
-        for param in self.bdec.parameters():
-            decoders_size += param.numel()
+        parameters_size = self.fc1.get_model_size()
+        parameters_size += self.fc2.get_model_size()
+        parameters_size += self.fc3.get_model_size()
 
-        decoders_size += self.wdec.entropy_bottleneck.quantiles.numel()
-        decoders_size += self.wdec.entropy_bottleneck._quantized_cdf.numel()
-        decoders_size += self.bdec.entropy_bottleneck.quantiles.numel()
-        decoders_size += self.bdec.entropy_bottleneck._quantized_cdf.numel()
-
-        self.wdec.train()
-        self.bdec.train()
-
-        return parameters_size * 4, decoders_size * 4
+        return parameters_size
 
     def update(self, force=False):
-        self.wdec.update(force=force)
-        self.bdec.update(force=force)
+        self.fc1.update(force=force)
+        self.fc2.update(force=force)
+        self.fc3.update(force=force)
 
     def forward(self, x):
+
         x = x.view(-1, 784)
         rate = 0
-        for i, (w, b) in enumerate(zip(self.w_param, self.b_param)):
-            new_w, likelyhoods_w = self.wdec(w)
-            new_b, likelyhoods_b = self.bdec(b)
-            new_rate = - th.log2(likelyhoods_w).sum()
-            new_rate = new_rate  - th.log2(likelyhoods_b).sum() 
-            new_rate = new_rate / (w.numel() + b.numel())
-            rate = rate + new_rate
-            x = F.linear(x, new_w, new_b)
-            if i < 2:
-                x = self.relu(x)
+
+        x, bpp = self.fc1(x)
+        rate = rate + bpp
+        x = self.relu(x)
+
+        x, bpp = self.fc2(x)
+        rate = rate + bpp
+        x = self.relu(x)
+
+        x, bpp = self.fc3(x)
+        rate = rate + bpp
         return x, rate
 
 class CafeLeNet(nn.Module):
@@ -256,15 +247,17 @@ def test_step(model, test_dataloader, device):
     cum_acc = 0
     num_steps = 0
     model.cpu()
+    model.eval()
     model.update(force=True)
-    model_size, decoder_size = model.get_rate()
-    uncompressed_model_size, uncompressed_decoder_size = model.get_model_size()
-    print("Rate:" + str(model_size + decoder_size))
-    print("Rate parts: " + str(model_size) + " " + str(decoder_size))
-    print("Uncompressed Rate:" + str(uncompressed_model_size + uncompressed_decoder_size))
-    print("Uncompressed Rate parts: " + str(uncompressed_model_size) + " " + str(uncompressed_decoder_size))
-    print("Compression Ratio:" + str( (uncompressed_model_size + uncompressed_decoder_size) / (model_size + decoder_size)))
+    parameters_size, tables_size = model.get_rate()
+    compressed_size = parameters_size + tables_size
+    original_size = model.get_original_size()
+    print("Rate:" + str(compressed_size))
+    print(f"Parameters Size: {parameters_size}, Tables Size: {tables_size}")
+    print("Original Rate:" + str(original_size))
+    print("Compression Ratio:" + str(original_size / compressed_size))
     model.to("cuda" if th.cuda.is_available() else "cpu")
+
     for x,y in test_dataloader:
         with th.no_grad():
             x = x.to(device)
@@ -276,6 +269,7 @@ def test_step(model, test_dataloader, device):
         cum_acc += (y_hat.argmax(dim=1) == y).float().mean().item()
         num_steps += 1
 
+    model.train()
     print("Test loss: ", cum_loss / num_steps)
     print("Test accuracy: ", cum_acc / num_steps)
 

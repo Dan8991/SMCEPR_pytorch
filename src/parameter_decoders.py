@@ -1,5 +1,6 @@
 import torch as th 
 import torch.nn as nn
+import math
 from torch.autograd import Function
 from compressai.entropy_models import EntropyBottleneck
 
@@ -49,20 +50,18 @@ class ConvDecoder(nn.Module):
 
 class LinearDecoder(nn.Module):
 
-    def __init__(self):
+    def __init__(self, span, fan_in):
+        span_const = math.sqrt(6.0) / math.sqrt(fan_in) * 2 / span
         super(LinearDecoder, self).__init__()
         self.b = nn.Parameter(th.zeros(1), requires_grad=True)
-        self.w = nn.Parameter(th.ones(1), requires_grad=True)  
-        self.entropy_bottleneck = EntropyBottleneck(1)
-        self.ste = StraightThrough()
+        self.w = nn.Parameter(th.ones(1) * span_const, requires_grad=True)  
 
-    def update(self, force=False):
-        self.entropy_bottleneck.update(force)
+    def get_model_size(self):
+        return (self.w.numel() + self.b.numel()) * 4
         
     def forward(self, x):
-        x_hat, x_likelyhoods = self.entropy_bottleneck(x.unsqueeze(1))
-        w_out = (self.ste.apply(x) + self.b) * self.w
-        return w_out, x_likelyhoods
+        w_out = (x + self.b) * self.w
+        return w_out
 
 
 
