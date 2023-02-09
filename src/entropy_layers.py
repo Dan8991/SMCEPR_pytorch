@@ -51,7 +51,7 @@ class EntropyLinear(nn.Module):
             self.ema_b = self.ema_decay * self.ema_b + (1 - self.ema_decay) * self.b
             
         _, likelyhoods_w = self.entropy_bottleneck_w(self.ema_w.unsqueeze(0).unsqueeze(0))
-        _, likelyhoods_b = self.entropy_bottleneck_b(self.ema_w.unsqueeze(0).unsqueeze(0))
+        _, likelyhoods_b = self.entropy_bottleneck_b(self.ema_b.unsqueeze(0).unsqueeze(0))
 
         w_hat = self.ste.apply(self.ema_w)
         b_hat = self.ste.apply(self.ema_b)
