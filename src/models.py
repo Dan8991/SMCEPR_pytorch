@@ -7,6 +7,7 @@ from entropy_layers import EntropyLinear
 import torch.nn.functional as F
 import math
 import matplotlib.pyplot as plt
+from torch.utils.data import Dataset
 
 class LeNet(nn.Module):
 
@@ -264,7 +265,7 @@ def train_step(model, x, y, opt, device, lambda_RD, criterion):
     opt.step()
     return loss.item(), rate
 
-def test_step(model, test_dataloader, device, criterion):
+def test_step(model, test_dataloader, device, lambda_RD, criterion):
     cum_loss = 0
     cum_acc = 0
     num_steps = 0
@@ -280,12 +281,15 @@ def test_step(model, test_dataloader, device, criterion):
     print("Compression Ratio:" + str(original_size / compressed_size))
     model.to("cuda" if th.cuda.is_available() else "cpu")
 
+    final_loss = 0
+    i = 0
     for x,y in test_dataloader:
         with th.no_grad():
             x = x.to(device)
             y = y.to(device)
             y_hat, rate = model(x)
             loss = criterion(y_hat, y)
+            final_loss += loss.item() + rate.item()
 
         cum_loss += loss.item()
         cum_acc += (y_hat.argmax(dim=1) == y).float().mean().item()
@@ -294,5 +298,21 @@ def test_step(model, test_dataloader, device, criterion):
     model.train()
     print("Test loss: ", cum_loss / num_steps)
     print("Test accuracy: ", cum_acc / num_steps)
+    print("Final Loss: ", final_loss / num_steps)
+    return final_loss / num_steps
 
+
+class TensorDataset(Dataset):
+
+    def __init__(self, x, y):
+
+        self.x = x
+        self.y = y
+
+    def __len__(self):
+        return len(self.x)
+
+    def __getitem__(self, idx):
+
+        return self.x[idx].float() / 255, self.y[idx]
 

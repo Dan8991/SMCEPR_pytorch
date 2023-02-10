@@ -3,12 +3,25 @@ from torchvision.datasets import MNIST
 from torch.optim import Adam
 import matplotlib.pyplot as plt
 from torchvision import transforms
-from models import EntropyLeNet, LeNet, CafeLeNet, EntropyCafeLeNet, train_step, test_step
-from torch.utils.data import DataLoader
+from models import EntropyLeNet, LeNet, CafeLeNet, EntropyCafeLeNet, train_step, test_step, TensorDataset
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 import os
+import numpy as np
 
 train_data = MNIST("../datasets", train=True, download=True, transform=transforms.ToTensor())
+train_subset, val_subset = th.utils.data.random_split(
+        train_data, [50000, 10000], generator=th.Generator().manual_seed(1))
+
+X_train = train_subset.dataset.data[train_subset.indices]
+y_train = train_subset.dataset.targets[train_subset.indices]
+
+X_val = val_subset.dataset.data[val_subset.indices]
+y_val = val_subset.dataset.targets[val_subset.indices]
+
+train_data = TensorDataset(X_train, y_train)
+val_data = TensorDataset(X_val, y_val)
+
 test_data = MNIST("../datasets", train=False, download=True, transform=transforms.ToTensor())
 
 iterations = 200000
@@ -25,15 +38,20 @@ opt = Adam([
 ])
 
 train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=os.cpu_count())
+val_dataloader = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_workers=os.cpu_count())
 test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=os.cpu_count())
 
 criterion = th.nn.CrossEntropyLoss().to(device)
 i = 0
-lambda_RD = 1
+lambda_RD = 0.5
+best_model = None
+best_loss = np.inf
+epoch = 0
 while i < iterations:
     cum_loss = 0
     cum_rate = 0
     num_steps = 0
+    epoch += 1
     for x, y in tqdm(train_dataloader):
         x = x.to(device)
         y = y.to(device)
@@ -50,6 +68,19 @@ while i < iterations:
         cum_rate += rate
         i += 1
         num_steps += 1
-        if i % 1000 == 0:
-            test_step(model, test_dataloader, device, criterion)
+    if epoch % 5 == 0:
+        val_loss = test_step(
+            model,
+            val_dataloader,
+            device,
+            lambda_RD,
+            criterion
+        )
+        if val_loss < best_loss:
+            best_loss = val_loss
+            best_model = model.state_dict()
+
     print(f"Train Loss: {cum_loss / num_steps}, {cum_rate / num_steps}")
+
+model.load_state_dict(best_model)
+test_loss = test_step(model, test_dataloader, device, lambda_RD, criterion)
