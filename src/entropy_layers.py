@@ -35,6 +35,18 @@ class EntropyLinear(nn.Module):
         self.entropy_bottleneck_b = EntropyBottleneck(1)
         self.ste = StraightThrough()
 
+    def get_non_entropy_parameters(self):
+
+        w_params = [self.w]
+        b_params = [self.b]
+
+        return w_params + b_params
+
+    def get_entropy_parameters(self):
+        entropy_w_params = list(self.entropy_bottleneck_w.parameters()) 
+        entropy_b_params = list(self.entropy_bottleneck_b.parameters())
+        return entropy_w_params + entropy_b_params
+
     def forward(self, x):
 
         if self.w.is_cuda:

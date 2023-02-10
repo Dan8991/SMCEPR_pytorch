@@ -38,7 +38,7 @@ class EntropyLeNet(nn.Module):
         self.wdec = LinearDecoder(span=span, fan_in=300.0)
         self.bdec = LinearDecoder(span=span, fan_in=100.0)
         self.cdec = LinearDecoder(span=span, fan_in=100.0)
-        self.ema_decay = 0
+        self.ema_decay = 0.99
 
         # creating the entropic linear layers
         self.fc1 = EntropyLinear(784, 300, self.wdec, self.bdec, self.ema_decay)
@@ -65,6 +65,26 @@ class EntropyLeNet(nn.Module):
 
         # initialize bias
         layer.b.data.uniform_(-mult, mult)
+
+    def get_non_entropy_parameters(self):
+
+        fc1_params = self.fc1.get_non_entropy_parameters()
+        fc2_params = self.fc2.get_non_entropy_parameters()
+        fc3_params = self.fc3.get_non_entropy_parameters()
+
+        decoder_params = list(self.wdec.parameters())
+        decoder_params += list(self.bdec.parameters())
+        decoder_params += list(self.cdec.parameters())
+
+        return fc1_params + fc2_params + fc3_params + decoder_params
+
+    def get_entropy_parameters(self):
+
+        fc1_params = self.fc1.get_entropy_parameters()
+        fc2_params = self.fc2.get_entropy_parameters()
+        fc3_params = self.fc3.get_entropy_parameters()
+
+        return fc1_params + fc2_params + fc3_params
 
     def get_rate(self):
 
@@ -233,18 +253,18 @@ class EntropyCafeLeNet(nn.Module):
                 x = self.relu(x)
         return x
 
-def train_step(model, x, y, opt, device, lambda_RD):
+def train_step(model, x, y, opt, device, lambda_RD, criterion):
     x = x.to(device)
     y = y.to(device)
     opt.zero_grad()
     y_hat, rate = model(x)
-    loss = nn.CrossEntropyLoss()(y_hat, y) 
+    loss = criterion(y_hat, y) 
     loss = loss + lambda_RD * rate
     loss.backward()
     opt.step()
     return loss.item(), rate
 
-def test_step(model, test_dataloader, device):
+def test_step(model, test_dataloader, device, criterion):
     cum_loss = 0
     cum_acc = 0
     num_steps = 0
@@ -265,7 +285,7 @@ def test_step(model, test_dataloader, device):
             x = x.to(device)
             y = y.to(device)
             y_hat, rate = model(x)
-            loss = nn.CrossEntropyLoss()(y_hat, y)
+            loss = criterion(y_hat, y)
 
         cum_loss += loss.item()
         cum_acc += (y_hat.argmax(dim=1) == y).float().mean().item()
