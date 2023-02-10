@@ -85,7 +85,6 @@ class EntropyLinear(nn.Module):
         self.ema_b = self.ema_b.to(device)
     
     def update(self, force=False):
-        print("update", force)
         self.entropy_bottleneck_w.update(force=force)
         self.entropy_bottleneck_b.update(force=force)
 
@@ -117,7 +116,6 @@ class EntropyLinear(nn.Module):
 
         self.ema_to_device("cuda" if self.w.is_cuda else "cpu")
 
-        print("parameters_size: ", parameters_size)
         return parameters_size, tables_size
 
     def get_model_size(self):
