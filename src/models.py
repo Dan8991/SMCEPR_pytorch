@@ -48,6 +48,8 @@ class EntropyLeNet(nn.Module):
         self.init_weights(self.fc1, span, 300.0)
         self.init_weights(self.fc2, span, 300.0)
         self.init_weights(self.fc3, span, 100.0)
+        
+        self.dropout = nn.Dropout(0.1)
 
     def init_weights(self, layer, span, min_in):
 
@@ -98,11 +100,11 @@ class EntropyLeNet(nn.Module):
 
         x, bpp = self.fc1(x)
         rate = rate + bpp
-        x = self.relu(x)
+        x = self.dropout(self.relu(x))
 
         x, bpp = self.fc2(x)
         rate = rate + bpp
-        x = self.relu(x)
+        x = self.dropout(self.relu(x))
 
         x, bpp = self.fc3(x)
         rate = rate + bpp
