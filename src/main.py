@@ -52,7 +52,7 @@ while i < iterations:
     cum_rate = 0
     num_steps = 0
     epoch += 1
-    for x, y in tqdm(train_dataloader):
+    for x, y in train_dataloader:
         x = x.to(device)
         y = y.to(device)
         loss, rate = train_step(

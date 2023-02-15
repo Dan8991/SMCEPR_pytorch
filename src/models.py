@@ -289,16 +289,21 @@ def test_step(model, test_dataloader, device, lambda_RD, criterion):
             y = y.to(device)
             y_hat, rate = model(x)
             loss = criterion(y_hat, y)
-            final_loss += loss.item() + rate.item()
+            final_loss += loss.item() + lambda_RD * rate.item()
 
         cum_loss += loss.item()
         cum_acc += (y_hat.argmax(dim=1) == y).float().mean().item()
         num_steps += 1
 
     model.train()
-    print("Test loss: ", cum_loss / num_steps)
-    print("Test accuracy: ", cum_acc / num_steps)
-    print("Final Loss: ", final_loss / num_steps)
+    cum_loss = cum_loss / num_steps
+    cum_acc = cum_acc / num_steps
+    final_loss = final_loss / num_steps
+    print(
+        f"Test loss: {cum_loss:.3f}, "
+        f"Test accuracy: {cum_acc:.3f}, "
+        f"Final Loss: {final_loss:.3f}"
+    )
     return final_loss / num_steps
 
 
