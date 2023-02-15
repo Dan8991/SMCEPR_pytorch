@@ -47,6 +47,7 @@ lambda_RD = 0.5
 best_model = None
 best_loss = np.inf
 epoch = 0
+iters_without_best = 0
 while i < iterations:
     cum_loss = 0
     cum_rate = 0
@@ -77,10 +78,17 @@ while i < iterations:
             criterion
         )
         if val_loss < best_loss:
+            print("FOUND BEST MODEL")
             best_loss = val_loss
             best_model = model.state_dict()
+            iters_without_best = 0
+        else:
+            iters_without_best += 1
 
-    print(f"Train Loss: {cum_loss / num_steps}, {cum_rate / num_steps}")
+        print(f"Train Loss: {cum_loss / num_steps}, {cum_rate / num_steps}")
+        print()
+    if iters_without_best > 10:
+        break
 
 model.load_state_dict(best_model)
 test_loss = test_step(model, test_dataloader, device, lambda_RD, criterion)
