@@ -37,7 +37,7 @@ class ConvDecoder(nn.Module):
         self.w = nn.Parameter(th.ones(self.HW, self.HW), requires_grad=True)
 
     def get_model_size(self):
-        return (self.w.numel() + self.b.numel()) * 4
+        return (self.w.numel() + self.b.numel()) * 2
 
     def forward(self, x):
         i = x.shape[0]
@@ -60,7 +60,7 @@ class LinearDecoder(nn.Module):
         self.w = nn.Parameter(th.ones(1) * span_const, requires_grad=True)  
 
     def get_model_size(self):
-        return (self.w.numel() + self.b.numel()) * 4
+        return (self.w.numel() + self.b.numel()) * 2
         
     def forward(self, x):
         w_out = (x + self.b) * self.w

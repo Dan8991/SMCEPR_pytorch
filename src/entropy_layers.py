@@ -244,9 +244,9 @@ class EntropyConv2d(nn.Module):
 
         tables_size = 0
         #computing the size of the tables
-        tables_size += self.entropy_bottleneck_w.quantiles.numel() * 4
+        tables_size += self.entropy_bottleneck_w.quantiles.numel() * 2
         tables_size += self.entropy_bottleneck_w._quantized_cdf.numel() * 2
-        tables_size += self.entropy_bottleneck_b.quantiles.numel() * 4
+        tables_size += self.entropy_bottleneck_b.quantiles.numel() * 2
         tables_size += self.entropy_bottleneck_b._quantized_cdf.numel() * 2
 
         self.entropy_bottleneck_w.train()
