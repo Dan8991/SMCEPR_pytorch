@@ -16,7 +16,7 @@ class LeNet(nn.Module):
         self.fc1 = nn.Linear(784, 300)
         self.fc2 = nn.Linear(300, 100)
         self.fc3 = nn.Linear(100, 10)
-        self.relu = nn.ReLU()
+        self.relu = nn.LeakyReLU()
 
     def forward(self, x):
         x = x.view(-1, 784)
@@ -32,14 +32,14 @@ class EntropyLeNet(nn.Module):
         super().__init__()
 
         # activations
-        self.relu = nn.ReLU()
+        self.relu = nn.LeakyReLU()
 
         #creating the decoders for the linear layers
         #The fan in should be the smallest input size for the group of layers considered by the decoder
         self.wdec = LinearDecoder(span=span, fan_in=300.0)
         self.bdec = LinearDecoder(span=span, fan_in=100.0)
         self.cdec = LinearDecoder(span=span, fan_in=100.0)
-        self.ema_decay = 0.99
+        self.ema_decay = 0
 
         # creating the entropic linear layers
         self.fc1 = EntropyLinear(784, 300, self.wdec, self.bdec, self.ema_decay)
@@ -141,7 +141,7 @@ class CafeLeNet(nn.Module):
         self.max_pool = nn.MaxPool2d(2)
         self.fc1 = nn.Linear(4*4*50, 500)
         self.fc2 = nn.Linear(500, 10)
-        self.relu = nn.ReLU()
+        self.relu = nn.LeakyReLU()
 
     def forward(self, x):
         x = self.max_pool(self.relu(self.conv1(x)))
@@ -159,7 +159,7 @@ class EntropyCafeLeNet(nn.Module):
 
         # activations
         self.max_pool = nn.MaxPool2d(2)
-        self.relu = nn.ReLU()
+        self.relu = nn.LeakyReLU()
 
         self.conv_decoder = ConvDecoder(5)
         # creating the decoders for the linear layers
