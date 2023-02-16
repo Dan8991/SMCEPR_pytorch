@@ -3,7 +3,7 @@ import torch as th
 from parameter_decoders import ConvDecoder, LinearDecoder
 from torch.nn.init import kaiming_uniform_, _calculate_fan_in_and_fan_out
 from torch.nn.init import uniform_
-from entropy_layers import EntropyLinear
+from entropy_layers import EntropyLinear, EntropyConv2d
 import torch.nn.functional as F
 import math
 import matplotlib.pyplot as plt
@@ -161,98 +161,123 @@ class EntropyCafeLeNet(nn.Module):
         self.max_pool = nn.MaxPool2d(2)
         self.relu = nn.ReLU()
 
-        # creating parameters for conv layers
-        self.conv_params = [(1, 20, 5), (20, 50, 5)]
-        
-        self.conv_w_param = nn.ParameterList([
-            nn.Parameter(
-                th.randn(o, i, k, k), requires_grad=True
-            ) for i, o, k in self.conv_params
-        ])
-
-        self.conv_b_param = nn.ParameterList([
-            nn.Parameter(
-                th.zeros(o), requires_grad=True
-            ) for i, o, k in self.conv_params
-        ])
-
-        # creating the decoders for the conv layers
-        self.wdecs = nn.ModuleList([
-            ConvDecoder(*self.conv_params[0]),
-            ConvDecoder(*self.conv_params[1])
-        ])
-
+        self.conv_decoder = ConvDecoder(5)
         # creating the decoders for the linear layers
-        self.wdec_lin = LinearDecoder()
-
+        self.wdec_lin = LinearDecoder(10, 800)
         # creating the parameters for the biases 
-        self.wdec_bias = LinearDecoder()
+        self.wdec_bias = LinearDecoder(10, 500)
+        self.ema_decay = 0
+        
+        self.conv1 = EntropyConv2d(
+            5,
+            1,
+            20,
+            weight_decoder=self.conv_decoder,
+            bias_decoder=self.wdec_bias,
+            ema_decay=self.ema_decay
+        )
+        self.conv2 = EntropyConv2d(
+            5,
+            20,
+            50,
+            weight_decoder=self.conv_decoder,
+            bias_decoder=self.wdec_bias,
+            ema_decay=self.ema_decay
+        )
+        self.fc1 = EntropyLinear(
+            4*4*50,
+            500,
+            self.wdec_lin,
+            self.wdec_bias,
+            self.ema_decay
+        )
+        self.fc2 = EntropyLinear(
+            500,
+            10,
+            self.wdec_lin,
+            self.wdec_bias,
+            self.ema_decay
+        )
 
-        # creating parameters for linear layers
-        self.lin_params = [(4*4*50, 500), (500, 10)]
+        # for w, b in zip(self.conv_w_param, self.conv_b_param):
+            # self.init_weights(w, b)
 
-        self.lin_w_param = nn.ParameterList([
-            nn.Parameter(
-                th.randn(o, i), requires_grad=True
-            ) for i, o in self.lin_params
-        ])
+        # for w, b in zip(self.lin_w_param, self.lin_b_param):
+            # self.init_weights(w, b)
 
-        self.lin_b_param = nn.ParameterList([
-            nn.Parameter(
-                th.zeros(o), requires_grad=True
-            ) for i, o in self.lin_params
-        ])
 
-        for w, b in zip(self.conv_w_param, self.conv_b_param):
-            self.init_weights(w, b)
+    def get_non_entropy_parameters(self):
 
-        for w, b in zip(self.lin_w_param, self.lin_b_param):
-            self.init_weights(w, b)
+        fc1_params = self.fc1.get_non_entropy_parameters()
+        fc2_params = self.fc2.get_non_entropy_parameters()
+        conv1_params = self.conv1.get_non_entropy_parameters()
+        conv2_params = self.conv2.get_non_entropy_parameters()
+
+        decoder_params = list(self.conv_decoder.parameters())
+        decoder_params += list(self.wdec_lin.parameters())
+        decoder_params += list(self.wdec_bias.parameters())
+
+        return fc1_params + fc2_params + conv1_params + conv2_params + decoder_params
+
+    def get_entropy_parameters(self):
+
+        fc1_params = self.fc1.get_entropy_parameters()
+        fc2_params = self.fc2.get_entropy_parameters()
+        conv1_params = self.conv1.get_entropy_parameters()
+        conv2_params = self.conv2.get_entropy_parameters()
+
+        return fc1_params + fc2_params + conv1_params + conv2_params    
 
     def get_rate(self):
-        parameters_size = 0
-        decoders_size = 0
-        for w, b in zip(self.conv_w_param, self.conv_b_param):
-            parameters_size += w.numel() + b.numel()
 
-        for w, b in zip(self.lin_w_param, self.lin_b_param):
-            parameters_size += w.numel() + b.numel()
+        p1, t1 = self.fc1.get_compressed_params_size()
+        p2, t2 = self.fc2.get_compressed_params_size()
+        p3, t3 = self.conv1.get_compressed_params_size()
+        p4, t4 = self.conv2.get_compressed_params_size()
 
-        for param in self.wdecs.parameters():
-            decoders_size += param.numel()
+        d1 = self.conv_decoder.get_model_size()
+        d2 = self.wdec_lin.get_model_size()
+        d3 = self.wdec_bias.get_model_size()
 
-        for param in self.wdec_lin.parameters():
-            decoders_size += param.numel()
+        parameters_size = p1 + p2 + p3 + p4
+        entropy_model_size = t1 + t2 + t3 + t4 + d1 + d2 + d3
+        return parameters_size, entropy_model_size
 
-        for param in self.wdec_bias.parameters():
-            decoders_size += param.numel()
+    def get_original_size(self):
 
-        return parameters_size * 4, decoders_size * 4
+        parameters_size = self.fc1.get_model_size()
+        parameters_size += self.fc2.get_model_size()
+        parameters_size += self.conv1.get_model_size()
+        parameters_size += self.conv2.get_model_size()
 
-    def init_weights(self, w, b):
+        return parameters_size
 
-        # initialize weights
-        kaiming_uniform_(w, a=math.sqrt(5))
-
-        # initialize bias
-        fan_in, _ = _calculate_fan_in_and_fan_out(w)
-        bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
-        uniform_(b, -bound, bound)
+    def update(self, force=False):
+        self.fc1.update(force=force)
+        self.fc2.update(force=force)
+        self.conv1.update(force=force)
+        self.conv2.update(force=force)
 
     def forward(self, x):
-        for w, b, wdec in zip(self.conv_w_param, self.conv_b_param, self.wdecs):
-            new_w, rate = wdec(w)
-            new_b, rate = self.wdec_bias(b)
-            x = self.max_pool(self.relu(F.conv2d(x, w, b)))
+        rate = 0
 
+        x, bpp = self.conv1(x)
+        rate = rate + bpp
+        x = self.max_pool(self.relu(x))
+
+        x, bpp = self.conv2(x)
+        rate = rate + bpp
+        x = self.max_pool(self.relu(x))
+        
         x = x.view(-1, 4*4*50)
-        for i, (w, b) in enumerate(zip(self.lin_w_param, self.lin_b_param)):
-            new_w = self.wdec_lin(w)
-            new_b = self.wdec_bias(b)
-            x = F.linear(x, w, b)
-            if i == 0:
-                x = self.relu(x)
-        return x
+
+        x, bpp = self.fc1(x)
+        rate = rate + bpp
+        x = self.relu(x)
+
+        x, bpp = self.fc2(x)
+        rate = rate + bpp
+        return x, rate
 
 def train_step(model, x, y, opt, device, lambda_RD, criterion):
     x = x.to(device)
@@ -319,5 +344,5 @@ class TensorDataset(Dataset):
 
     def __getitem__(self, idx):
 
-        return self.x[idx].float() / 255, self.y[idx]
+        return self.x[idx].float().unsqueeze(0) / 255, self.y[idx]
 

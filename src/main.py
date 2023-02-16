@@ -3,7 +3,7 @@ from torchvision.datasets import MNIST
 from torch.optim import Adam
 import matplotlib.pyplot as plt
 from torchvision import transforms
-from models import EntropyLeNet, LeNet, CafeLeNet, EntropyCafeLeNet, train_step, test_step, TensorDataset
+from models import EntropyLeNet, LeNet, CafeLeNet, EntropyCafeLeNet, train_step, test_step, TensorDataset, EntropyCafeLeNet
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 import os
@@ -28,7 +28,7 @@ iterations = 200000
 batch_size = 1024
 lr = 0.001
 
-model = EntropyLeNet()
+model = EntropyCafeLeNet()
 print("Model size and decoder size for the network:", model.get_original_size())
 device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
 model = model.to(device)

@@ -25,25 +25,28 @@ class ConvDecoder(nn.Module):
     so I assume that the IOxIO was a typo and instead use a matrix with shape 
     HWxHW (same for the bias)
     '''
-    def __init__(self, in_channel, out_channel, kernel_size):
+    def __init__(self, kernel_size):
         super(ConvDecoder, self).__init__()
 
         if type(kernel_size) == int:
             kernel_size = (kernel_size, kernel_size)
 
         self.kernel_size = kernel_size
-        self.in_channel = in_channel
-        self.out_channel = out_channel
-        self.IO = in_channel * out_channel
         self.HW = kernel_size[0] * kernel_size[1]
         self.b = nn.Parameter(th.zeros(self.HW), requires_grad=True)
         self.w = nn.Parameter(th.ones(self.HW, self.HW), requires_grad=True)
 
+    def get_model_size(self):
+        return (self.w.numel() + self.b.numel()) * 4
+
     def forward(self, x):
-        x = x.view(self.IO, self.HW)
+        i = x.shape[0]
+        o = x.shape[1]
+        IO = i * o
+        x = x.view(IO, self.HW)
         return th.matmul(x + self.b, self.w).T.reshape(
-            self.out_channel,
-            self.in_channel,
+            i,
+            o,
             self.kernel_size[0],
             self.kernel_size[1]
         )
