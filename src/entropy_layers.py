@@ -14,115 +14,158 @@ class StraightThrough(Function):
     def backward(ctx, grad_output):
         return grad_output
 
-class EntropyLinear(nn.Module):
+class EntropyLayer(nn.Module):
 
-    def __init__(self, in_features, out_features, weight_decoder, bias_decoder=None, ema_decay=0.999):
-        super(EntropyLinear, self).__init__()
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        l,
+        weight_decoder,
+        bias_decoder=None,
+        ema_decay=0.999,
+        extra_args={},
+    ):
 
+        super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.ema_decay = ema_decay
-
-        self.w = nn.Parameter(th.randn(out_features, in_features), requires_grad=True)
-        self.b = nn.Parameter(th.zeros(out_features), requires_grad=True)
-        self.ema_w = th.zeros_like(self.w)
-        self.ema_b = th.zeros_like(self.b)
-
+        self.l = l
         self.weight_decoder = weight_decoder
         self.bias_decoder = bias_decoder
+        self.ema_decay = ema_decay
 
-        self.entropy_bottleneck_w = EntropyBottleneck(1)
-        self.entropy_bottleneck_b = EntropyBottleneck(1)
+        self.w = nn.Parameter(th.randn(in_features * out_features, l), requires_grad=True)
+        self.ema_w = th.zeros_like(self.w)
+
+        if bias_decoder:
+            self.b = nn.Parameter(
+                th.randn(out_features, 1),
+                requires_grad=True,
+            )
+
+        self.ema_b = th.zeros_like(self.b)
+
+        self.entropy_bottleneck_w = EntropyBottleneck(l)
+        if bias_decoder:
+            self.entropy_bottleneck_b = EntropyBottleneck(1)
+
         self.ste = StraightThrough()
+        self.layer_func = None
+
+        self.extra_args = extra_args
 
     def get_non_entropy_parameters(self):
-
-        w_params = [self.w]
-        b_params = [self.b]
-
-        return w_params + b_params
+        params = [self.w]
+        if self.bias_decoder:
+            params += [self.b]
+        return params
 
     def get_entropy_parameters(self):
-        entropy_w_params = list(self.entropy_bottleneck_w.parameters()) 
-        entropy_b_params = list(self.entropy_bottleneck_b.parameters())
-        return entropy_w_params + entropy_b_params
-
-    def forward(self, x):
-
-        if self.w.is_cuda:
-            self.ema_to_device("cuda")
-        else:
-            self.ema_to_device("cpu")
-                
-        if self.training:
-
-            self.ema_w = self.ema_w.detach()
-            self.ema_b = self.ema_b.detach()
-
-            self.ema_w = self.ema_decay * self.ema_w + (1 - self.ema_decay) * self.w
-            self.ema_b = self.ema_decay * self.ema_b + (1 - self.ema_decay) * self.b
-            
-        _, likelyhoods_w = self.entropy_bottleneck_w(self.ema_w.unsqueeze(0).unsqueeze(0))
-        _, likelyhoods_b = self.entropy_bottleneck_b(self.ema_b.unsqueeze(0).unsqueeze(0))
-
-        w_hat = self.ste.apply(self.ema_w)
-        b_hat = self.ste.apply(self.ema_b)
-
-        w_hat = self.weight_decoder(w_hat)
-        b_hat = self.bias_decoder(b_hat)
-
-        out = F.linear(x, w_hat, b_hat)
-
-
-        rate = - th.log2(likelyhoods_w).sum()
-        rate = rate - th.log2(likelyhoods_b).sum()
-        bpp = rate / (w_hat.numel() + b_hat.numel()) 
-
-        return out, bpp
-
-    def ema_to_device(self, device):
-        self.ema_w = self.ema_w.to(device)
-        self.ema_b = self.ema_b.to(device)
+        params = list(self.entropy_bottleneck_w.parameters())
+        if self.bias_decoder:
+            params += list(self.entropy_bottleneck_b.parameters())
+        return params
     
+    def to(self, device):
+        self.device = device
+        self.ema_w = self.ema_w.to(device)
+        self.entropy_bottleneck_w = self.entropy_bottleneck_w.to(device)
+        if self.bias_decoder:
+            self.ema_b = self.ema_b.to(device)
+            self.entropy_bottleneck_b = self.entropy_bottleneck_b.to(device)
+            
+        return super().to(device)
+
     def update(self, force=False):
         self.entropy_bottleneck_w.update(force=force)
-        self.entropy_bottleneck_b.update(force=force)
+        if self.bias_decoder:
+            self.entropy_bottleneck_b.update(force=force)
 
     def get_compressed_params_size(self):
-
-        parameters_size = 0
-       
-        self.entropy_bottleneck_w.eval()
-        self.entropy_bottleneck_b.eval()
-
-        self.ema_to_device("cpu")
-
-        #computing the size of the compressed parameters
-        strings = self.entropy_bottleneck_w.compress(self.ema_w.unsqueeze(0).unsqueeze(0).round())
-        parameters_size += len(strings[0])
-
-        strings = self.entropy_bottleneck_b.compress(self.ema_b.unsqueeze(0).unsqueeze(0).round())
-        parameters_size += len(strings[0])
-
-        tables_size = 0
-        #computing the size of the tables
-        tables_size += self.entropy_bottleneck_w.quantiles.numel() * 4
+        self.to("cpu")
+        strings = self.entropy_bottleneck_w.compress(self.ema_w.T.unsqueeze(0).round())
+        parameters_size = len(strings[0])
+        tables_size = self.entropy_bottleneck_w.quantiles.numel() * 2
         tables_size += self.entropy_bottleneck_w._quantized_cdf.numel() * 2
-        tables_size += self.entropy_bottleneck_b.quantiles.numel() * 4
-        tables_size += self.entropy_bottleneck_b._quantized_cdf.numel() * 2
+        if self.bias_decoder:
+            strings = self.entropy_bottleneck_b.compress(self.ema_b.T.unsqueeze(0).round())
+            parameters_size += len(strings[0])
+            tables_size += self.entropy_bottleneck_b.quantiles.numel() * 2
+            tables_size += self.entropy_bottleneck_b._quantized_cdf.numel() * 2
+            self.entropy_bottleneck_b.train()
 
         self.entropy_bottleneck_w.train()
-        self.entropy_bottleneck_b.train()
-
-        self.ema_to_device("cuda" if self.w.is_cuda else "cpu")
+        self.to(self.device)
 
         return parameters_size, tables_size
 
     def get_model_size(self):
-        return (self.w.numel() + self.b.numel()) * 4
+        if self.bias_decoder:
+            return self.w.numel() * 4 + self.b.numel() * 4
+        else:
+            return self.w.numel() * 4
 
+    def get_weight_and_bias(self, w, b):
+        raise Exception("Implement get_weight_and_bias in a child class")
 
-class EntropyConv2d(nn.Module):
+    def get_ema_and_rate(self):
+        if self.training:
+            self.ema_w = self.ema_w.detach()
+            self.ema_w = self.ema_decay * self.ema_w + (1 - self.ema_decay) * self.w
+            if self.bias_decoder:
+                self.ema_b = self.ema_b.detach()
+                self.ema_b = self.ema_decay * self.ema_b + (1 - self.ema_decay) * self.b
+
+        _, likelyhoods_w = self.entropy_bottleneck_w(self.ema_w.T.unsqueeze(0))
+        w_hat = self.ste.apply(self.ema_w)
+        w_hat = self.weight_decoder(w_hat)
+        rate_w = - th.log2(likelyhoods_w).sum() / w_hat.numel()
+        rate_b = 0
+        b_hat = None
+        if self.bias_decoder:
+            _, likelyhoods_b = self.entropy_bottleneck_b(self.ema_b.T.unsqueeze(0))
+            b_hat = self.ste.apply(self.ema_b)
+            b_hat = self.bias_decoder(b_hat)
+            rate_b = - th.log2(likelyhoods_b).sum() / b_hat.numel()
+
+        return w_hat, b_hat, rate_w, rate_b
+
+    def forward(self, x):
+
+        w_hat, b_hat, rate_w, rate_b = self.get_ema_and_rate()
+        w_hat, b_hat = self.get_weight_and_bias(w_hat, b_hat)
+        return self.layer_func(x, w_hat, bias=b_hat, **self.extra_args), rate_w + rate_b
+        
+
+class EntropyLinear(EntropyLayer):
+
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        weight_decoder,
+        bias_decoder=None,
+        ema_decay=0.999
+    ):
+        super().__init__(
+            in_features,
+            out_features,
+            1,
+            weight_decoder,
+            bias_decoder=bias_decoder,
+            ema_decay=ema_decay
+        )
+
+        self.layer_func = F.linear
+
+    def get_weight_and_bias(self, w, b):
+        if b is not None:
+            b = b.view(self.out_features)
+        w = w.view(self.out_features, self.in_features)
+        return w, b
+
+class EntropyConv2d(EntropyLayer):
 
     def __init__(
         self,
@@ -135,128 +178,36 @@ class EntropyConv2d(nn.Module):
         bias_decoder=None,
         ema_decay=0.999
     ):
-        super(EntropyConv2d, self).__init__()
-
-        self.in_features = in_features
-        self.out_features = out_features
-        self.ema_decay = ema_decay
-        self.stride = stride
-        self.padding = padding
-
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size, kernel_size)
 
-        self.w = nn.Parameter(th.randn(
-            out_features,
+        super().__init__(
             in_features,
-            *kernel_size
-        ), requires_grad=True)
-
-        self.b = nn.Parameter(th.zeros(out_features), requires_grad=True)
-        self.ema_w = th.zeros_like(self.w)
-        self.ema_b = th.zeros_like(self.b)
-
-        self.weight_decoder = weight_decoder
-        self.bias_decoder = bias_decoder
-
-        self.entropy_bottleneck_w = EntropyBottleneck(1)
-        self.entropy_bottleneck_b = EntropyBottleneck(1)
-        self.ste = StraightThrough()
-
-    def get_non_entropy_parameters(self):
-
-        w_params = [self.w]
-        b_params = [self.b]
-
-        return w_params + b_params
-
-    def get_entropy_parameters(self):
-        entropy_w_params = list(self.entropy_bottleneck_w.parameters()) 
-        entropy_b_params = list(self.entropy_bottleneck_b.parameters())
-        return entropy_w_params + entropy_b_params
-
-    def forward(self, x):
-
-        if self.w.is_cuda:
-            self.ema_to_device("cuda")
-        else:
-            self.ema_to_device("cpu")
-                
-        if self.training:
-
-            self.ema_w = self.ema_w.detach()
-            self.ema_b = self.ema_b.detach()
-
-            self.ema_w = self.ema_decay * self.ema_w + (1 - self.ema_decay) * self.w
-            self.ema_b = self.ema_decay * self.ema_b + (1 - self.ema_decay) * self.b
-            
-        
-        IO = self.ema_w.shape[0] * self.ema_w.shape[1]
-        HW = self.ema_w.shape[2] * self.ema_w.shape[3]
-        _, likelyhoods_w = self.entropy_bottleneck_w(self.ema_w.reshape(1, 1, -1))
-        _, likelyhoods_b = self.entropy_bottleneck_b(self.ema_b.unsqueeze(0).unsqueeze(0))
-
-        w_hat = self.ste.apply(self.ema_w)
-        b_hat = self.ste.apply(self.ema_b)
-
-        w_hat = self.weight_decoder(w_hat)
-        b_hat = self.bias_decoder(b_hat)
-
-        out = F.conv2d(
-            x,
-            w_hat,
-            b_hat,
-            stride=self.stride,
-            padding=self.padding
+            out_features,
+            kernel_size[0] * kernel_size[1],
+            weight_decoder,
+            bias_decoder=bias_decoder,
+            ema_decay=ema_decay,
         )
 
-        rate = - th.log2(likelyhoods_w).sum()
-        rate = rate - th.log2(likelyhoods_b).sum()
-        bpp = rate / (w_hat.numel() + b_hat.numel()) 
+        self.in_features = in_features
+        self.out_features = out_features
+        self.kernel_size = kernel_size
+        self.extra_args = {
+            "padding": padding,
+            "stride": stride
+        }
+        self.layer_func = F.conv2d
 
-        return out, bpp
-
-    def ema_to_device(self, device):
-        self.ema_w = self.ema_w.to(device)
-        self.ema_b = self.ema_b.to(device)
-    
-    def update(self, force=False):
-        self.entropy_bottleneck_w.update(force=force)
-        self.entropy_bottleneck_b.update(force=force)
-
-    def get_compressed_params_size(self):
-
-        parameters_size = 0
-       
-        self.entropy_bottleneck_w.eval()
-        self.entropy_bottleneck_b.eval()
-
-        self.ema_to_device("cpu")
-
-        #computing the size of the compressed parameters
-        IO = self.ema_w.shape[0] * self.ema_w.shape[1]
-        HW = self.ema_w.shape[2] * self.ema_w.shape[3]
-        strings = self.entropy_bottleneck_w.compress(self.ema_w.reshape(1, 1, -1).round())
-        parameters_size += len(strings[0])
-
-        strings = self.entropy_bottleneck_b.compress(self.ema_b.unsqueeze(0).unsqueeze(0).round())
-        parameters_size += len(strings[0])
-
-        tables_size = 0
-        #computing the size of the tables
-        tables_size += self.entropy_bottleneck_w.quantiles.numel() * 2
-        tables_size += self.entropy_bottleneck_w._quantized_cdf.numel() * 2
-        tables_size += self.entropy_bottleneck_b.quantiles.numel() * 2
-        tables_size += self.entropy_bottleneck_b._quantized_cdf.numel() * 2
-
-        self.entropy_bottleneck_w.train()
-        self.entropy_bottleneck_b.train()
-
-        self.ema_to_device("cuda" if self.w.is_cuda else "cpu")
-
-        return parameters_size, tables_size
-
-    def get_model_size(self):
-        return (self.w.numel() + self.b.numel()) * 4
+    def get_weight_and_bias(self, w, b):
+        if b is not None:
+            b = b.view(self.out_features)
+        w = w.view(
+            self.out_features,
+            self.in_features,
+            self.kernel_size[0],
+            self.kernel_size[1]
+        )
+        return w, b
 
 

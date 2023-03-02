@@ -1,6 +1,6 @@
 from torch import nn
 import torch as th
-from parameter_decoders import ConvDecoder, LinearDecoder
+from parameter_decoders import ConvDecoder, LinearDecoder, AffineDecoder
 from torch.nn.init import kaiming_uniform_, _calculate_fan_in_and_fan_out
 from torch.nn.init import uniform_
 from entropy_layers import EntropyLinear, EntropyConv2d
@@ -36,9 +36,9 @@ class EntropyLeNet(nn.Module):
 
         #creating the decoders for the linear layers
         #The fan in should be the smallest input size for the group of layers considered by the decoder
-        self.wdec = LinearDecoder(span=span, fan_in=300.0)
-        self.bdec = LinearDecoder(span=span, fan_in=100.0)
-        self.cdec = LinearDecoder(span=span, fan_in=100.0)
+        self.wdec = AffineDecoder(1)
+        self.bdec = AffineDecoder(1)
+        self.cdec = AffineDecoder(1)
         self.ema_decay = 0
 
         # creating the entropic linear layers
@@ -46,26 +46,38 @@ class EntropyLeNet(nn.Module):
         self.fc2 = EntropyLinear(300, 100, self.wdec, self.bdec, self.ema_decay)
         self.fc3 = EntropyLinear(100, 10, self.cdec, self.bdec, self.ema_decay)
 
-        self.init_weights(self.fc1, span, 300.0)
-        self.init_weights(self.fc2, span, 300.0)
-        self.init_weights(self.fc3, span, 100.0)
+        # self.init_weights(self.fc1, span, 300.0)
+        # self.init_weights(self.fc2, span, 300.0)
+        # self.init_weights(self.fc3, span, 100.0)
         
         self.dropout = nn.Dropout(0.1)
 
-    def init_weights(self, layer, span, min_in):
+    # def init_weights(self, layer, span, min_in):
 
-        fan_in = layer.w.data.size()[1]
+        # fan_in = layer.w.data.size()[1]
 
-        const_max = math.sqrt(6.0) / math.sqrt(min_in)
-        default_const = math.sqrt(6.0) / math.sqrt(fan_in)
+        # const_max = math.sqrt(6.0) / math.sqrt(min_in)
+        # default_const = math.sqrt(6.0) / math.sqrt(fan_in)
 
-        mult = span / 2 / const_max * default_const
+        # mult = span / 2 / const_max * default_const
 
-        # initialize weights
-        layer.w.data.uniform_(-mult, mult)
+        # # initialize weights
+        # layer.w.data.uniform_(-mult, mult)
 
-        # initialize bias
-        layer.b.data.uniform_(-mult, mult)
+        # # initialize bias
+        # layer.b.data.uniform_(-mult, mult)
+
+    def to(self, device):
+
+        self.fc1.to(device)
+        self.fc2.to(device)
+        self.fc3.to(device)
+
+        self.wdec.to(device)
+        self.bdec.to(device)
+        self.cdec.to(device)
+
+        return super().to(device)
 
     def get_non_entropy_parameters(self):
 
@@ -161,11 +173,11 @@ class EntropyCafeLeNet(nn.Module):
         self.max_pool = nn.MaxPool2d(2)
         self.relu = nn.LeakyReLU()
 
-        self.conv_decoder = ConvDecoder(5)
+        self.conv_decoder = AffineDecoder(25)
         # creating the decoders for the linear layers
-        self.wdec_lin = LinearDecoder(10, 800)
+        self.wdec_lin = AffineDecoder(1)
         # creating the parameters for the biases 
-        self.wdec_bias = LinearDecoder(10, 500)
+        self.wdec_bias = AffineDecoder(1)
         self.ema_decay = 0
         
         self.conv1 = EntropyConv2d(
@@ -205,6 +217,19 @@ class EntropyCafeLeNet(nn.Module):
         # for w, b in zip(self.lin_w_param, self.lin_b_param):
             # self.init_weights(w, b)
 
+
+    def to(self, device):
+
+        self.conv1.to(device)
+        self.conv2.to(device)
+        self.fc1.to(device)
+        self.fc2.to(device)
+
+        self.conv_decoder.to(device)
+        self.wdec_lin.to(device)
+        self.wdec_bias.to(device)
+
+        return super().to(device)
 
     def get_non_entropy_parameters(self):
 
