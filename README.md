@@ -13,11 +13,19 @@ otherwise if you want to import the code as an external package you need to run
 pip install git+https://github.com/Dan8991/SMCEPR_pytorch
 ```
 
+Or if you want a specific version run
+
+```bash
+pip install git+https://github.com/Dan8991/SMCEPR_pytorch@{version}
+```
+
+where version is the name of one of the version tags e.g. v0.1.0
+
 if you are in a conda environment you also need to install pip beforehand with 
 ```bash
 conda install pip
 ```
-
+	
 ### Running code
 To test the code you can run 
 ```python
