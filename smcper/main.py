@@ -25,10 +25,10 @@ val_data = TensorDataset(X_val, y_val)
 test_data = MNIST("../datasets", train=False, download=True, transform=transforms.ToTensor())
 
 iterations = 200000
-batch_size = 1024
+batch_size = 128
 lr = 0.001
 
-model = EntropyCafeLeNet()
+model = EntropyLeNet()
 print("Model size and decoder size for the network:", model.get_original_size())
 device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
 model = model.to(device)
@@ -43,7 +43,7 @@ test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False, nu
 
 criterion = th.nn.CrossEntropyLoss().to(device)
 i = 0
-lambda_RD = 0.5
+lambda_RD = 1
 best_model = None
 best_loss = np.inf
 epoch = 0
