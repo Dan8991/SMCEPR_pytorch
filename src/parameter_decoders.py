@@ -57,13 +57,13 @@ class AffineDecoder(nn.Module):
         super().__init__()
         self.l = l
         self.b = nn.Parameter(th.zeros(1, l), requires_grad=True)
-        self.w = nn.Parameter(th.ones(l, l), requires_grad=True)
+        self.w = nn.Parameter(th.ones(l, l) * (- 4), requires_grad=True)
 
     def get_model_size(self):
         return (self.w.numel() + self.b.numel()) * 2
 
     def forward(self, x):
-        return th.matmul(x + self.b, self.w)
+        return th.matmul(x + self.b, th.exp(self.w))
 
 class LinearDecoder(nn.Module):
 

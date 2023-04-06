@@ -54,6 +54,11 @@ class EntropyLayer(nn.Module):
         self.layer_func = None
 
         self.extra_args = extra_args
+        # apply init_weights
+        self.init_weights()
+
+    def init_weights(self):
+        pass
 
     def get_non_entropy_parameters(self):
         params = [self.w]
@@ -159,6 +164,11 @@ class EntropyLinear(EntropyLayer):
 
         self.layer_func = F.linear
 
+    def init_weights(self):
+        nn.init.xavier_uniform_(self.w.view(self.out_features, self.in_features))
+        self.w.data /= th.exp(th.tensor(-4))
+        nn.init.zeros_(self.b)
+
     def get_weight_and_bias(self, w, b):
         if b is not None:
             b = b.view(self.out_features)
@@ -198,6 +208,16 @@ class EntropyConv2d(EntropyLayer):
             "stride": stride
         }
         self.layer_func = F.conv2d
+
+    def init_weights(self):
+        nn.init.xavier_uniform_(
+            self.w.view(
+                self.out_features,
+                self.in_features,
+                *self.kernel_size
+            )
+        )
+        self.w.data /= th.exp(th.tensor(-4))
 
     def get_weight_and_bias(self, w, b):
         if b is not None:
