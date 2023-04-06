@@ -111,3 +111,21 @@ where
 * stride: same as pytorch
 * bias_decoder: this is the decoder used to transform the quantized representations into the biases for the linear layer so it should be an AffineDecoder
 * ema_decay: constant used for exponential movin average of the weights
+
+In general the forward function for Entropy layers will return both the output of the layer and the 
+rate that can be optimized after weighting it with a lambda parameter. Some useful functions that 
+can be called on these layers are:
+
+```python
+def update(self, force=False)
+```
+this is required by compressai that is used to implement the compression part and is used to
+update the probability tables, should be run before evaluation.
+
+```python
+def get_compressed_params_size(self)
+```
+returns the total exact compressed size of the layer, this can be used to understand how much the 
+network will weight in total when transmitted
+
+
