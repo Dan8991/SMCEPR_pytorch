@@ -36,7 +36,7 @@ class EntropyLayer(nn.Module):
         self.ema_decay = ema_decay
 
         self.w = nn.Parameter(th.randn(in_features * out_features, l), requires_grad=True)
-        self.ema_w = th.zeros_like(self.w)
+        self.ema_w = nn.Parameter(th.zeros_like(self.w))
 
         if bias_decoder:
             self.b = nn.Parameter(
@@ -44,7 +44,7 @@ class EntropyLayer(nn.Module):
                 requires_grad=True,
             )
 
-        self.ema_b = th.zeros_like(self.b)
+        self.ema_b = nn.Parameter(th.zeros_like(self.b))
 
         self.entropy_bottleneck_w = EntropyBottleneck(l)
         if bias_decoder:
@@ -72,22 +72,13 @@ class EntropyLayer(nn.Module):
             params += list(self.entropy_bottleneck_b.parameters())
         return params
     
-    def to(self, device):
-        self.device = device
-        self.ema_w = self.ema_w.to(device)
-        self.entropy_bottleneck_w = self.entropy_bottleneck_w.to(device)
-        if self.bias_decoder:
-            self.ema_b = self.ema_b.to(device)
-            self.entropy_bottleneck_b = self.entropy_bottleneck_b.to(device)
-            
-        return super().to(device)
-
     def update(self, force=False):
         self.entropy_bottleneck_w.update(force=force)
         if self.bias_decoder:
             self.entropy_bottleneck_b.update(force=force)
 
     def get_compressed_params_size(self):
+        device = self.w.device
         self.to("cpu")
         strings = self.entropy_bottleneck_w.compress(self.ema_w.T.unsqueeze(0).round())
         parameters_size = len(strings[0])
@@ -101,7 +92,7 @@ class EntropyLayer(nn.Module):
             self.entropy_bottleneck_b.train()
 
         self.entropy_bottleneck_w.train()
-        self.to(self.device)
+        self.to(device)
 
         return parameters_size, tables_size
 
@@ -116,21 +107,27 @@ class EntropyLayer(nn.Module):
 
     def get_ema_and_rate(self):
         if self.training:
-            self.ema_w = self.ema_w.detach()
-            self.ema_w = self.ema_decay * self.ema_w + (1 - self.ema_decay) * self.w
+            detatched_w = self.ema_w.detach()
+            self.ema_w = nn.Parameter(self.ema_decay * detatched_w + (1 - self.ema_decay) * self.w)
             if self.bias_decoder:
-                self.ema_b = self.ema_b.detach()
-                self.ema_b = self.ema_decay * self.ema_b + (1 - self.ema_decay) * self.b
+                detatched_b = self.ema_b.detach()
+                self.ema_b = nn.Parameter(self.ema_decay * detatched_b + (1 - self.ema_decay) * self.b)
 
-        _, likelyhoods_w = self.entropy_bottleneck_w(self.ema_w.T.unsqueeze(0))
-        w_hat = self.ste.apply(self.ema_w)
+        if self.training:
+            b = self.b
+            w = self.w
+        else:
+            b = self.ema_b
+            w = self.ema_w
+        _, likelyhoods_w = self.entropy_bottleneck_w(w.T.unsqueeze(0))
+        w_hat = self.ste.apply(w)
         w_hat = self.weight_decoder(w_hat)
         rate_w = - th.log2(likelyhoods_w).sum() / w_hat.numel()
         rate_b = 0
         b_hat = None
         if self.bias_decoder:
-            _, likelyhoods_b = self.entropy_bottleneck_b(self.ema_b.T.unsqueeze(0))
-            b_hat = self.ste.apply(self.ema_b)
+            _, likelyhoods_b = self.entropy_bottleneck_b(b.T.unsqueeze(0))
+            b_hat = self.ste.apply(b)
             b_hat = self.bias_decoder(b_hat)
             rate_b = - th.log2(likelyhoods_b).sum() / b_hat.numel()
 

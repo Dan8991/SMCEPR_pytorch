@@ -67,17 +67,6 @@ class EntropyLeNet(nn.Module):
         # # initialize bias
         # layer.b.data.uniform_(-mult, mult)
 
-    def to(self, device):
-
-        self.fc1.to(device)
-        self.fc2.to(device)
-        self.fc3.to(device)
-
-        self.wdec.to(device)
-        self.bdec.to(device)
-        self.cdec.to(device)
-
-        return super().to(device)
 
     def get_non_entropy_parameters(self):
 
@@ -217,19 +206,6 @@ class EntropyCafeLeNet(nn.Module):
         # for w, b in zip(self.lin_w_param, self.lin_b_param):
             # self.init_weights(w, b)
 
-
-    def to(self, device):
-
-        self.conv1.to(device)
-        self.conv2.to(device)
-        self.fc1.to(device)
-        self.fc2.to(device)
-
-        self.conv_decoder.to(device)
-        self.wdec_lin.to(device)
-        self.wdec_bias.to(device)
-
-        return super().to(device)
 
     def get_non_entropy_parameters(self):
 
