@@ -35,16 +35,16 @@ class EntropyLayer(nn.Module):
         self.bias_decoder = bias_decoder
         self.ema_decay = ema_decay
 
-        self.w = nn.Parameter(th.randn(in_features * out_features, l), requires_grad=True)
-        self.ema_w = nn.Parameter(th.zeros_like(self.w))
+        self.weight = nn.Parameter(th.randn(in_features * out_features, l), requires_grad=True)
+        self.ema_w = nn.Parameter(th.zeros_like(self.weight))
 
         if bias_decoder:
-            self.b = nn.Parameter(
+            self.bias = nn.Parameter(
                 th.randn(out_features, 1),
                 requires_grad=True,
             )
 
-        self.ema_b = nn.Parameter(th.zeros_like(self.b))
+        self.ema_b = nn.Parameter(th.zeros_like(self.bias))
 
         self.entropy_bottleneck_w = EntropyBottleneck(l)
         if bias_decoder:
@@ -61,9 +61,9 @@ class EntropyLayer(nn.Module):
         pass
 
     def get_non_entropy_parameters(self):
-        params = [self.w]
+        params = [self.weight]
         if self.bias_decoder:
-            params += [self.b]
+            params += [self.bias]
         return params
 
     def get_entropy_parameters(self):
@@ -78,7 +78,7 @@ class EntropyLayer(nn.Module):
             self.entropy_bottleneck_b.update(force=force)
 
     def get_compressed_params_size(self):
-        device = self.w.device
+        device = self.weight.device
         self.to("cpu")
         strings = self.entropy_bottleneck_w.compress(self.ema_w.T.unsqueeze(0).round())
         parameters_size = len(strings[0])
@@ -98,9 +98,9 @@ class EntropyLayer(nn.Module):
 
     def get_model_size(self):
         if self.bias_decoder:
-            return self.w.numel() * 4 + self.b.numel() * 4
+            return self.weight.numel() * 4 + self.bias.numel() * 4
         else:
-            return self.w.numel() * 4
+            return self.weight.numel() * 4
 
     def get_weight_and_bias(self, w, b):
         raise Exception("Implement get_weight_and_bias in a child class")
@@ -108,14 +108,14 @@ class EntropyLayer(nn.Module):
     def get_ema_and_rate(self):
         if self.training:
             detatched_w = self.ema_w.detach()
-            self.ema_w = nn.Parameter(self.ema_decay * detatched_w + (1 - self.ema_decay) * self.w)
+            self.ema_w = nn.Parameter(self.ema_decay * detatched_w + (1 - self.ema_decay) * self.weight)
             if self.bias_decoder:
                 detatched_b = self.ema_b.detach()
-                self.ema_b = nn.Parameter(self.ema_decay * detatched_b + (1 - self.ema_decay) * self.b)
+                self.ema_b = nn.Parameter(self.ema_decay * detatched_b + (1 - self.ema_decay) * self.bias)
 
         if self.training:
-            b = self.b
-            w = self.w
+            b = self.bias
+            w = self.weight
         else:
             b = self.ema_b
             w = self.ema_w
@@ -162,9 +162,9 @@ class EntropyLinear(EntropyLayer):
         self.layer_func = F.linear
 
     def init_weights(self):
-        nn.init.xavier_uniform_(self.w.view(self.out_features, self.in_features))
-        self.w.data /= th.exp(th.tensor(-4))
-        nn.init.zeros_(self.b)
+        nn.init.xavier_uniform_(self.weight.view(self.out_features, self.in_features))
+        self.weight.data /= th.exp(th.tensor(-4))
+        nn.init.zeros_(self.bias)
 
     def get_weight_and_bias(self, w, b):
         if b is not None:
@@ -208,13 +208,13 @@ class EntropyConv2d(EntropyLayer):
 
     def init_weights(self):
         nn.init.xavier_uniform_(
-            self.w.view(
+            self.weight.view(
                 self.out_features,
                 self.in_features,
                 *self.kernel_size
             )
         )
-        self.w.data /= th.exp(th.tensor(-4))
+        self.weight.data /= th.exp(th.tensor(-4))
 
     def get_weight_and_bias(self, w, b):
         if b is not None:
