@@ -3,6 +3,8 @@ import torch.nn as nn
 from torch.autograd import Function
 from compressai.entropy_models import EntropyBottleneck
 from torch.nn import functional as F
+import io
+import numpy as np
 
 class StraightThrough(Function):
 
@@ -95,6 +97,83 @@ class EntropyLayer(nn.Module):
         self.to(device)
 
         return parameters_size, tables_size
+
+    def compress(self):
+        device = self.weight.device
+        self.to("cpu")
+        strings_w = self.entropy_bottleneck_w.compress(
+            self.ema_w.T.unsqueeze(0).round()
+        )
+        quantiles_w = self.entropy_bottleneck_w.quantiles.half()
+        quantized_cdf_w = self.entropy_bottleneck_w._quantized_cdf
+        if self.bias_decoder:
+            strings_bias = self.entropy_bottleneck_b.compress(
+                self.ema_b.T.unsqueeze(0).round()
+            )
+            quantiles_b = self.entropy_bottleneck_b.quantiles.half()
+            quantized_cdf_b = self.entropy_bottleneck_b._quantized_cdf
+            self.entropy_bottleneck_b.train()
+
+        self.entropy_bottleneck_w.train()
+        self.to(device)
+
+        b = tensor_to_byte(quantiles_w)
+        b += tensor_to_byte(quantized_cdf_w)
+        b += tensor_to_byte(quantiles_b)
+        b += tensor_to_byte(quantized_cdf_b)
+        b += int.to_bytes(len(strings_w[0]), 4, byteorder="little")
+        b += strings_w[0]
+        b += int.to_bytes(len(strings_bias[0]), 4, byteorder="little")
+        b += strings_bias[0]
+
+        self.ema_w.data = self.entropy_bottleneck_w.decompress(
+            strings_w, 
+            self.ema_w.shape
+        )[0][0]
+        self.ema_b.data = self.entropy_bottleneck_b.decompress(
+            strings_bias,
+            self.ema_b.shape
+        )[0][0]
+
+
+        return b
+
+    def decompress(self, b):
+        device = self.weight.device
+        self.to("cpu")
+
+        quantiles_w, b = get_next_tensor(b, dtype=np.float16)
+        quantized_cdf_w, b = get_next_tensor(b, dtype=np.int32)
+
+        quantiles_b, b = get_next_tensor(b, dtype=np.float16)
+        quantized_cdf_b, b = get_next_tensor(b, dtype=np.int32)
+
+        quantized_cdf_w = quantized_cdf_w.squeeze(-1)
+        quantized_cdf_b = quantized_cdf_b.squeeze(-1)
+
+        strings_w, b = get_bytestream(b)
+        strings_b, b = get_bytestream(b)
+
+        strings_w = [strings_w]
+        strings_b = [strings_b]
+
+        self.entropy_bottleneck_w.quantiles.data = quantiles_w.float()
+        self.entropy_bottleneck_w._quantized_cdf.data = quantized_cdf_w
+
+        self.entropy_bottleneck_b.quantiles.data = quantiles_b.float()
+        self.entropy_bottleneck_b._quantized_cdf.data = quantized_cdf_b
+
+        self.ema_w.data = self.entropy_bottleneck_w.decompress(
+            strings_w, 
+            self.ema_w.shape
+        )[0][0]
+        self.ema_b.data = self.entropy_bottleneck_b.decompress(
+            strings_b,
+            self.ema_b.shape
+        )[0][0]
+
+        self.to(device)
+
 
     def get_model_size(self):
         if self.bias_decoder:
@@ -227,4 +306,30 @@ class EntropyConv2d(EntropyLayer):
         )
         return w, b
 
+def tensor_to_byte(t):
+    shape = t.shape
+    if len(shape) == 3:
+        b1 = int.to_bytes(shape[1], 2, byteorder='little')
+        b2 = int.to_bytes(shape[2], 2, byteorder='little')
+    else:
+        b1 = int.to_bytes(shape[1], 2, byteorder='little')
+        b2 = int.to_bytes(1, 2, byteorder='little')
+    tb = t.detach().cpu().numpy().tobytes()
+    b = b1 + b2 + tb
+    return b
 
+def get_next_tensor(b, dtype):
+    b1 = int.from_bytes(b[:2], byteorder='little')
+    b = b[2:]
+    b2 = int.from_bytes(b[:2], byteorder='little')
+    b = b[2:]
+    num_bytes = b1 * b2 * (2 if dtype == np.float16 else 4)
+    t = th.from_numpy(np.frombuffer(b[:num_bytes], dtype=dtype).copy())
+    t = t.reshape(1, b1, b2)
+    b = b[num_bytes:]
+    return t, b
+
+def get_bytestream(b):
+    length = int.from_bytes(b[:4], byteorder='little')
+    b = b[4:]
+    return b[:length], b[length:]
