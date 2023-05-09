@@ -2,6 +2,7 @@ import torch as th
 import torch.nn as nn
 import math
 from torch.autograd import Function
+import numpy as np
 from compressai.entropy_models import EntropyBottleneck
 
 class StraightThrough(Function):
@@ -36,6 +37,27 @@ class ConvDecoder(nn.Module):
         self.bias = nn.Parameter(th.zeros(self.HW), requires_grad=True)
         self.weight = nn.Parameter(th.ones(self.HW, self.HW), requires_grad=True)
 
+    def compress(self):
+        bw = self.weight.detach().cpu().numpy().tobytes()
+        bb = self.bias.detach().cpu().numpy().tobytes()
+        return bw + bb
+
+    def decompress(self, b):
+        l = self.HW
+
+        w = th.from_numpy(
+            np.frombuffer(b[4:4 + l * l * 4],
+            dtype=np.float32
+        ).copy()).view(l, l)
+
+        b = th.from_numpy(
+            np.frombuffer(b[4 + l * l * 4:],
+            dtype=np.float32
+        ).copy()).view(l)
+
+        self.weight.data = w.to(self.weight.device)
+        self.bias.data = b.to(self.bias.device)
+
     def get_model_size(self):
         return (self.weight.numel() + self.bias.numel()) * 2
 
@@ -65,6 +87,27 @@ class AffineDecoder(nn.Module):
     def forward(self, x):
         return th.matmul(x + self.bias, th.exp(self.weight))
 
+    def compress(self):
+        bw = self.weight.detach().cpu().numpy().tobytes()
+        bb = self.bias.detach().cpu().numpy().tobytes()
+        return bw + bb
+
+    def decompress(self, b):
+        l = self.l
+
+        w = th.from_numpy(
+            np.frombuffer(b[4:4 + l * l * 4],
+            dtype=np.float32
+        ).copy()).view(l, l)
+
+        b = th.from_numpy(
+            np.frombuffer(b[4 + l * l * 4:],
+            dtype=np.float32
+        ).copy()).view(1, l)
+
+        self.weight.data = w.to(self.weight.device)
+        self.bias.data = b.to(self.bias.device)
+
 class LinearDecoder(nn.Module):
 
     def __init__(self, span, fan_in):
@@ -75,6 +118,18 @@ class LinearDecoder(nn.Module):
 
     def get_model_size(self):
         return (self.weight.numel() + self.bias.numel()) * 2
+
+    def compress(self):
+        bw = self.weight.detach().cpu().numpy().tobytes()
+        bb = self.bias.detach().cpu().numpy().tobytes()
+        return bw + bb
+
+    def decompress(self, b):
+        w = th.from_numpy(np.frombuffer(b[4:8], dtype=np.float32).copy()).view(1)
+        b = th.from_numpy(np.frombuffer(b[8:], dtype=np.float32).copy()).view(1)
+        self.weight.data = w.to(self.weight.device)
+        self.bias.data = b.to(self.bias.device)
+
         
     def forward(self, x):
         w_out = (x + self.bias) * self.weight
