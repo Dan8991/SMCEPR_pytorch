@@ -46,17 +46,18 @@ class ConvDecoder(nn.Module):
         l = self.HW
 
         w = th.from_numpy(
-            np.frombuffer(b[4:4 + l * l * 4],
+            np.frombuffer(b[:l * l * 4],
             dtype=np.float32
         ).copy()).view(l, l)
 
-        b = th.from_numpy(
-            np.frombuffer(b[4 + l * l * 4:],
+        bias = th.from_numpy(
+            np.frombuffer(b[l * l * 4:l*l*4+l*4],
             dtype=np.float32
         ).copy()).view(l)
 
         self.weight.data = w.to(self.weight.device)
-        self.bias.data = b.to(self.bias.device)
+        self.bias.data = bias.to(self.bias.device)
+        return b[l*l*4+l*4:]
 
     def get_model_size(self):
         return (self.weight.numel() + self.bias.numel()) * 2
@@ -96,17 +97,18 @@ class AffineDecoder(nn.Module):
         l = self.l
 
         w = th.from_numpy(
-            np.frombuffer(b[4:4 + l * l * 4],
+            np.frombuffer(b[:l * l * 4],
             dtype=np.float32
         ).copy()).view(l, l)
 
-        b = th.from_numpy(
-            np.frombuffer(b[4 + l * l * 4:],
+        bias = th.from_numpy(
+            np.frombuffer(b[l * l * 4:l*l*4+l*4],
             dtype=np.float32
         ).copy()).view(1, l)
 
         self.weight.data = w.to(self.weight.device)
-        self.bias.data = b.to(self.bias.device)
+        self.bias.data = bias.to(self.bias.device)
+        return b[l*l*4+l*4:]
 
 class LinearDecoder(nn.Module):
 
@@ -125,10 +127,11 @@ class LinearDecoder(nn.Module):
         return bw + bb
 
     def decompress(self, b):
-        w = th.from_numpy(np.frombuffer(b[4:8], dtype=np.float32).copy()).view(1)
-        b = th.from_numpy(np.frombuffer(b[8:], dtype=np.float32).copy()).view(1)
+        w = th.from_numpy(np.frombuffer(b[:4], dtype=np.float32).copy()).view(1)
+        b = th.from_numpy(np.frombuffer(b[4:8], dtype=np.float32).copy()).view(1)
         self.weight.data = w.to(self.weight.device)
-        self.bias.data = b.to(self.bias.device)
+        self.bias.data = bias.to(self.bias.device)
+        return b[8:]
 
         
     def forward(self, x):

@@ -2,3 +2,4 @@ datasets
 smcper/__pycache__
 build/
 smcper.egg-info/
+tmp/

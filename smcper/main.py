@@ -37,9 +37,24 @@ opt = Adam([
     {"params": model.get_entropy_parameters(), "lr":1e-4}
 ])
 
-train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=os.cpu_count())
-val_dataloader = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_workers=os.cpu_count())
-test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=os.cpu_count())
+train_dataloader = DataLoader(
+    train_data,
+    batch_size=batch_size,
+    shuffle=True,
+    num_workers=os.cpu_count()
+)
+val_dataloader = DataLoader(
+    val_data,
+    batch_size=batch_size,
+    shuffle=False,
+    num_workers=os.cpu_count()
+)
+test_dataloader = DataLoader(
+    test_data,
+    batch_size=batch_size,
+    shuffle=False,
+    num_workers=os.cpu_count()
+)
 
 criterion = th.nn.CrossEntropyLoss().to(device)
 i = 0
@@ -48,11 +63,11 @@ best_model = None
 best_loss = np.inf
 epoch = 0
 iters_without_best = 0
-while i < iterations:
+for i in tqdm(range(iterations)):
     cum_loss = 0
     cum_rate = 0
     num_steps = 0
-    epoch += 1
+    epoch = i + 1
     for x, y in train_dataloader:
         x = x.to(device)
         y = y.to(device)
@@ -67,9 +82,10 @@ while i < iterations:
         )
         cum_loss += loss
         cum_rate += rate
-        i += 1
         num_steps += 1
     if epoch % 5 == 0:
+        model.update(force=True)
+        print(f"Compressed File size = {len(model.compress()) / 4 / 1024 } kB")
         val_loss = test_step(
             model,
             val_dataloader,
@@ -90,5 +106,9 @@ while i < iterations:
     if iters_without_best > 10:
         break
 
-model.load_state_dict(best_model)
+model.update(force=True)
+th.save(model.state_dict(), "entropy_lenet.pt")
+with open("tmp/compressed.bin", "wb") as f:
+    f.write(model.compress())
+
 test_loss = test_step(model, test_dataloader, device, lambda_RD, criterion)

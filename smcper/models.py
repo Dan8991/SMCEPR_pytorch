@@ -88,6 +88,25 @@ class EntropyLeNet(nn.Module):
 
         return fc1_params + fc2_params + fc3_params
 
+    def compress(self):
+        b = self.wdec.compress()
+        b += self.bdec.compress()
+        b += self.cdec.compress()
+        b += self.fc1.compress()
+        b += self.fc2.compress()
+        b += self.fc3.compress()
+        return b
+
+
+    def decompress(self, b):
+        lb = len(b)
+        b = self.wdec.decompress(b)
+        b = self.bdec.decompress(b)
+        b = self.cdec.decompress(b)
+        b = self.fc1.decompress(b)
+        b = self.fc2.decompress(b)
+        b = self.fc3.decompress(b)
+
     def get_rate(self):
 
         p1, t1 = self.fc1.get_compressed_params_size()
@@ -110,10 +129,10 @@ class EntropyLeNet(nn.Module):
 
         return parameters_size
 
-    def update(self, force=False):
-        self.fc1.update(force=force)
-        self.fc2.update(force=force)
-        self.fc3.update(force=force)
+    def update(self, force=False, super_up=True):
+        self.fc1.update(force=force, super_up=super_up)
+        self.fc2.update(force=force, super_up=super_up)
+        self.fc3.update(force=force, super_up=super_up)
 
     def forward(self, x):
 
@@ -297,7 +316,6 @@ def test_step(model, test_dataloader, device, lambda_RD, criterion):
     num_steps = 0
     model.cpu()
     model.eval()
-    model.update(force=True)
     parameters_size, tables_size = model.get_rate()
     compressed_size = parameters_size + tables_size
     original_size = model.get_original_size()

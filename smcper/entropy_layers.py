@@ -5,6 +5,7 @@ from compressai.entropy_models import EntropyBottleneck
 from torch.nn import functional as F
 import io
 import numpy as np
+from io_utils import tensor_to_byte, get_next_tensor, get_bytestream
 
 class StraightThrough(Function):
 
@@ -15,6 +16,37 @@ class StraightThrough(Function):
     @staticmethod
     def backward(ctx, grad_output):
         return grad_output
+
+class CustomEntropyBottleneck(EntropyBottleneck):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def update(self, force, super_up=True) -> bool:
+        # Check if we need to update the bottleneck parameters, the offsets are
+        # only computed and stored when the conditonal model is update()'d.
+        if super_up:
+            return super().update(force)
+        else:
+            if self._offset.numel() > 0 and not force:
+                return False
+
+            medians = self.quantiles[:, 0, 1]
+
+            minima = medians - self.quantiles[:, 0, 0]
+            minima = th.ceil(minima).int()
+            minima = th.clamp(minima, min=0)
+
+            maxima = self.quantiles[:, 0, 2] - medians
+            maxima = th.ceil(maxima).int()
+            maxima = th.clamp(maxima, min=0)
+
+            self._offset = -minima
+
+            pmf_start = medians - minima
+            pmf_length = maxima + minima + 1
+
+            self._cdf_length = pmf_length + 2
+            return True
 
 class EntropyLayer(nn.Module):
 
@@ -48,9 +80,9 @@ class EntropyLayer(nn.Module):
 
         self.ema_b = nn.Parameter(th.zeros_like(self.bias))
 
-        self.entropy_bottleneck_w = EntropyBottleneck(l)
+        self.entropy_bottleneck_w = CustomEntropyBottleneck(l)
         if bias_decoder:
-            self.entropy_bottleneck_b = EntropyBottleneck(1)
+            self.entropy_bottleneck_b = CustomEntropyBottleneck(1)
 
         self.ste = StraightThrough()
         self.layer_func = None
@@ -74,10 +106,10 @@ class EntropyLayer(nn.Module):
             params += list(self.entropy_bottleneck_b.parameters())
         return params
     
-    def update(self, force=False):
-        self.entropy_bottleneck_w.update(force=force)
+    def update(self, force=False, super_up=True):
+        self.entropy_bottleneck_w.update(force=force, super_up=super_up)
         if self.bias_decoder:
-            self.entropy_bottleneck_b.update(force=force)
+            self.entropy_bottleneck_b.update(force=force, super_up=super_up)
 
     def get_compressed_params_size(self):
         device = self.weight.device
@@ -126,16 +158,6 @@ class EntropyLayer(nn.Module):
         b += int.to_bytes(len(strings_bias[0]), 4, byteorder="little")
         b += strings_bias[0]
 
-        self.ema_w.data = self.entropy_bottleneck_w.decompress(
-            strings_w, 
-            self.ema_w.shape
-        )[0][0]
-        self.ema_b.data = self.entropy_bottleneck_b.decompress(
-            strings_bias,
-            self.ema_b.shape
-        )[0][0]
-
-
         return b
 
     def decompress(self, b):
@@ -159,9 +181,11 @@ class EntropyLayer(nn.Module):
 
         self.entropy_bottleneck_w.quantiles.data = quantiles_w.float()
         self.entropy_bottleneck_w._quantized_cdf.data = quantized_cdf_w
+        self.entropy_bottleneck_w._cdf_length = th.tensor([quantized_cdf_w.size(1)])
 
         self.entropy_bottleneck_b.quantiles.data = quantiles_b.float()
         self.entropy_bottleneck_b._quantized_cdf.data = quantized_cdf_b
+        self.entropy_bottleneck_b._cdf_length = th.tensor([quantized_cdf_b.size(1)])
 
         self.ema_w.data = self.entropy_bottleneck_w.decompress(
             strings_w, 
@@ -173,6 +197,7 @@ class EntropyLayer(nn.Module):
         )[0][0]
 
         self.to(device)
+        return b
 
 
     def get_model_size(self):
@@ -305,31 +330,3 @@ class EntropyConv2d(EntropyLayer):
             self.kernel_size[1]
         )
         return w, b
-
-def tensor_to_byte(t):
-    shape = t.shape
-    if len(shape) == 3:
-        b1 = int.to_bytes(shape[1], 2, byteorder='little')
-        b2 = int.to_bytes(shape[2], 2, byteorder='little')
-    else:
-        b1 = int.to_bytes(shape[1], 2, byteorder='little')
-        b2 = int.to_bytes(1, 2, byteorder='little')
-    tb = t.detach().cpu().numpy().tobytes()
-    b = b1 + b2 + tb
-    return b
-
-def get_next_tensor(b, dtype):
-    b1 = int.from_bytes(b[:2], byteorder='little')
-    b = b[2:]
-    b2 = int.from_bytes(b[:2], byteorder='little')
-    b = b[2:]
-    num_bytes = b1 * b2 * (2 if dtype == np.float16 else 4)
-    t = th.from_numpy(np.frombuffer(b[:num_bytes], dtype=dtype).copy())
-    t = t.reshape(1, b1, b2)
-    b = b[num_bytes:]
-    return t, b
-
-def get_bytestream(b):
-    length = int.from_bytes(b[:4], byteorder='little')
-    b = b[4:]
-    return b[:length], b[length:]
