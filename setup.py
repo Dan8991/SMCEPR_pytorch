@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name='smcper',
-    version='0.1.3',    
+    version='0.1.4',    
     description='A python package that allows you to import pytorch layers form model '
     'compression using the scalable model compression by entropy penalized reparameterization'
     'paper',
