@@ -5,7 +5,7 @@ from compressai.entropy_models import EntropyBottleneck
 from torch.nn import functional as F
 import io
 import numpy as np
-from io_utils import tensor_to_byte, get_next_tensor, get_bytestream
+from smcper.io_utils import tensor_to_byte, get_next_tensor, get_bytestream
 
 class StraightThrough(Function):
 
