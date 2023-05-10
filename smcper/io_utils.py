@@ -27,6 +27,5 @@ def get_next_tensor(b, dtype):
 
 def get_bytestream(b):
     length = int.from_bytes(b[:4], byteorder='little')
-    print("length", length)
     b = b[4:]
     return b[:length], b[length:]
